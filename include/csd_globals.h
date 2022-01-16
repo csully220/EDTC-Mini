@@ -10,18 +10,8 @@ struct hid_report {
 	int8_t thumb_x;
 	int8_t thumb_y;
 	uint8_t buttons;
+	uint8_t buttons2;
 } edtc_report;
 
-
-/*
-uint8_t sw1;
-uint8_t sw2;
-uint8_t sw1_lp;
-uint8_t sw2_lp;
-int16_t knob1;
-uint16_t knob2;
-uint16_t knob1_lp;
-uint16_t knob2_lp;
-*/
 
 #endif

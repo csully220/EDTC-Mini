@@ -1,354 +1,46 @@
-/*
- * This file is part of the libopencm3 project.
- *
- * Copyright (C) 2010 Gareth McMullin <gareth@blacksphere.co.nz>
- *
- * This library is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with this library.  If not, see <http://www.gnu.org/licenses/>.
- */
 
 #include <stdlib.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/systick.h>
-#include <libopencm3/stm32/spi.h>
+#include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/hid.h>
-#include "csd_globals.h"
-#include "csd_gpio.h"
 #include <string.h>
 
-/* Define this to include the DFU APP interface. */
-//#define INCLUDE_DFU_INTERFACE
+#include "csd_usb.h"
+#include "csd_gpio.h"
 
-#ifdef INCLUDE_DFU_INTERFACE
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/usb/dfu.h>
-#endif
+//#define BUFSZ 3
 
-static usbd_device *usbd_dev;
-#include "wcid.h"
+bool csdbg[8];
+float csflt[8];
+int csint[8];
 
-
-const struct usb_device_descriptor dev_descr = {
-	.bLength = USB_DT_DEVICE_SIZE,
-	.bDescriptorType = USB_DT_DEVICE,
-	.bcdUSB = 0x0200,
-	.bDeviceClass = 0,
-	.bDeviceSubClass = 0,
-	.bDeviceProtocol = 0,
-	.bMaxPacketSize0 = 64,
-	.idVendor = 0x0C5D,
-	.idProduct = 0x0030,
-	.bcdDevice = 0x0200,
-	.iManufacturer = 1,
-	.iProduct = 2,
-	.iSerialNumber = 3,
-	.bNumConfigurations = 1,
-};
-
-static const uint8_t hid_report_descriptor[] = {
-	0x05, 0x01, 			// USAGE_PAGE (Generic Desktop)
-	0x09, 0x04, 			// USAGE (Joystick)
-	0xA1, 0x00, 			// COLLECTION (Application)
-		0x09, 0x36, 		//     USAGE (Slider)
-		0x15, 0x81, 		//     LOGICAL_MINIMUM (-127)
-		0x25, 0x7F, 		//     LOGICAL_MAXIMUM (127)
-		0x75, 0x08, 		//     REPORT_SIZE (8)
-		0x95, 0x01, 		//     REPORT_COUNT (1)
-		0x81, 0x02,			//     INPUT (Data,Var,Abs)
-
-		0x05, 0x01, 		// USAGE_PAGE (Generic Desktop)
-		0x09, 0x01, 		// USAGE (Pointer)
-		0xA1, 0x00, 		// COLLECTION (Physical)
-			0x09, 0x30, 	// 		USAGE (X)
-			0x09, 0x31, 	// 		USAGE (Y)
-			0x15, 0x81, 	//      LOGICAL_MINIMUM (-127)
-			0x25, 0x7F, 	//      LOGICAL_MAXIMUM (127)
-			0x95, 0x02,     //  	REPORT_COUNT(2)
-			0x81, 0x02,		//  	INPUT (Data,Var,Abs)
-		0xc0,       		// END_COLLECTION
-
-		0x05, 0x09, 		// USAGE_PAGE (Buttons)
-		0x19, 0x01,  		// USAGE_MINUMUM (Button 1)
-		0x29, 0x08,         // USAGE_MAXIMUM (Button 8)
-		0x15, 0x00, 		// LOGICAL_MINIMUM (0)
-		0x25, 0x01, 		// LOGICAL_MAXIMUM (1)
-		0x35, 0x00, 		// PHYSICAL_MINIMUM (0)
-		0x45, 0x01, 		// PHYSICAL_MAXIMUM (1)
-		0x95, 0x08,     	// REPORT_COUNT(8)
-		0x75, 0x01, 		// REPORT_SIZE (1)
-		0x65, 0x00,         // UNIT (None)
-		0x81, 0x02,			// INPUT (Data,Var,Abs)
-	0xc0,       		//   END_COLLECTION	
-};
-
-static const struct {
-	struct usb_hid_descriptor hid_descriptor;
-	struct {
-		uint8_t bReportDescriptorType;
-		uint16_t wDescriptorLength;
-	} __attribute__((packed)) hid_report;
-} __attribute__((packed)) hid_function = {
-	.hid_descriptor = {
-		.bLength = sizeof(hid_function),
-		.bDescriptorType = USB_DT_HID,
-		.bcdHID = 0x0100,
-		.bCountryCode = 0,
-		.bNumDescriptors = 1,
-	},
-	.hid_report = {
-		.bReportDescriptorType = USB_DT_REPORT,
-		.wDescriptorLength = sizeof(hid_report_descriptor),
-	}
-};
-
-const struct usb_endpoint_descriptor hid_endpoint = {
-	.bLength = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType = USB_DT_ENDPOINT,
-	.bEndpointAddress = 0x81,
-	.bmAttributes = USB_ENDPOINT_ATTR_INTERRUPT,
-	.wMaxPacketSize = 4,
-	.bInterval = 0x20,
-};
-
-const struct usb_interface_descriptor hid_iface = {
-	.bLength = USB_DT_INTERFACE_SIZE,
-	.bDescriptorType = USB_DT_INTERFACE,
-	.bInterfaceNumber = 0,
-	.bAlternateSetting = 0,
-	.bNumEndpoints = 1,
-	.bInterfaceClass = USB_CLASS_HID,
-	.bInterfaceSubClass = 0, /* boot */
-	.bInterfaceProtocol = 0, /* 2 for mouse */
-	.iInterface = 0,
-
-	.endpoint = &hid_endpoint,
-
-	.extra = &hid_function,
-	.extralen = sizeof(hid_function),
-};
-
-#ifdef INCLUDE_DFU_INTERFACE
-const struct usb_dfu_descriptor dfu_function = {
-	.bLength = sizeof(struct usb_dfu_descriptor),
-	.bDescriptorType = DFU_FUNCTIONAL,
-	.bmAttributes = USB_DFU_CAN_DOWNLOAD | USB_DFU_WILL_DETACH,
-	.wDetachTimeout = 255,
-	.wTransferSize = 1024,
-	.bcdDFUVersion = 0x011A,
-};
-
-const struct usb_interface_descriptor dfu_iface = {
-	.bLength = USB_DT_INTERFACE_SIZE,
-	.bDescriptorType = USB_DT_INTERFACE,
-	.bInterfaceNumber = 1,
-	.bAlternateSetting = 0,
-	.bNumEndpoints = 0,
-	.bInterfaceClass = 0xFE,
-	.bInterfaceSubClass = 1,
-	.bInterfaceProtocol = 1,
-	.iInterface = 0,
-
-	.extra = &dfu_function,
-	.extralen = sizeof(dfu_function),
-};
-#endif
-
-const struct usb_interface ifaces[] = {{
-	.num_altsetting = 1,
-	.altsetting = &hid_iface,
-#ifdef INCLUDE_DFU_INTERFACE
-}, {
-	.num_altsetting = 1,
-	.altsetting = &dfu_iface,
-#endif
-}};
-
-const struct usb_config_descriptor config = {
-	.bLength = USB_DT_CONFIGURATION_SIZE,
-	.bDescriptorType = USB_DT_CONFIGURATION,
-	.wTotalLength = 0,
-#ifdef INCLUDE_DFU_INTERFACE
-	.bNumInterfaces = 2,
-#else
-	.bNumInterfaces = 1,
-#endif
-	.bConfigurationValue = 1,
-	.iConfiguration = 0,
-	.bmAttributes = 0xC0,
-	.bMaxPower = 0x32,
-
-	.interface = ifaces,
-};
-
-static const char *usb_strings[] = {
-	"Corvus Sim Devices",
-	"CSD Elite Dangerous Thrust Control",
-	"CSD EDTC",
-};
-
-/* Buffer to be used for control requests. */
-uint8_t usbd_control_buffer[128];
-
-static enum usbd_request_return_codes hid_control_request(usbd_device *dev, struct usb_setup_data *req, uint8_t **buf, uint16_t *len,
-			void (**complete)(usbd_device *, struct usb_setup_data *))
-{
-	(void)complete;
-	(void)dev;
-
-	if((req->bmRequestType != 0x81) ||
-	   (req->bRequest != USB_REQ_GET_DESCRIPTOR) ||
-	   (req->wValue != 0x2200))
-		return USBD_REQ_NOTSUPP;
-
-	/* Handle the HID report descriptor. */
-	*buf = (uint8_t *)hid_report_descriptor;
-	*len = sizeof(hid_report_descriptor);
-
-	return USBD_REQ_HANDLED;
-}
-
-#ifdef INCLUDE_DFU_INTERFACE
-static void dfu_detach_complete(usbd_device *dev, struct usb_setup_data *req)
-{
-	(void)req;
-	(void)dev;
-
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
-		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO10);
-	gpio_set(GPIOA, GPIO10);
-	scb_reset_core();
-}
-
-static enum usbd_request_return_codes dfu_control_request(usbd_device *dev, struct usb_setup_data *req, uint8_t **buf, uint16_t *len,
-			void (**complete)(usbd_device *, struct usb_setup_data *))
-{
-	(void)buf;
-	(void)len;
-	(void)dev;
-
-	if ((req->bmRequestType != 0x21) || (req->bRequest != DFU_DETACH))
-		return USBD_REQ_NOTSUPP; /* Only accept class request. */
-
-	*complete = dfu_detach_complete;
-
-	return USBD_REQ_HANDLED;
-}
-#endif
-
-static void hid_set_config(usbd_device *dev, uint16_t wValue)
-{
-	(void)wValue;
-	(void)dev;
-
-	usbd_ep_setup(dev, 0x81, USB_ENDPOINT_ATTR_INTERRUPT, 4, NULL);
-
-	usbd_register_control_callback(
-				dev,
-				USB_REQ_TYPE_STANDARD | USB_REQ_TYPE_INTERFACE,
-				USB_REQ_TYPE_TYPE | USB_REQ_TYPE_RECIPIENT,
-				hid_control_request);
-#ifdef INCLUDE_DFU_INTERFACE
-	usbd_register_control_callback(
-				dev,
-				USB_REQ_TYPE_CLASS | USB_REQ_TYPE_INTERFACE,
-				USB_REQ_TYPE_TYPE | USB_REQ_TYPE_RECIPIENT,
-				dfu_control_request);
-#endif
-
-	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
-	/* SysTick interrupt every N clock pulses: set reload to N-1 */
-	systick_set_reload(99999);
-	systick_interrupt_enable();
-	systick_counter_enable();
-}
-
-static void csd_clock_setup(void)
-{
-    rcc_clock_setup_in_hse_8mhz_out_72mhz();
-    rcc_periph_clock_enable(RCC_GPIOA);
-    rcc_periph_clock_enable(RCC_GPIOB);
-    rcc_periph_clock_enable(RCC_GPIOC);
-	rcc_periph_clock_enable(RCC_SPI2);
-}
-
-static void spi_setup(void) 
-{
-
-  /* Configure GPIOs: SS=PB12, SCK=PB13, MISO=PB14 and MOSI=PB15 */
-  gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_2_MHZ,
-            GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO12 |
-            								GPIO13 |
-                                            GPIO15 );
-
-  gpio_set_mode(GPIOB, GPIO_MODE_INPUT, GPIO_CNF_INPUT_FLOAT,
-          GPIO14);
-
-  /* Reset SPI, SPI_CR1 register cleared, SPI is disabled */
-  spi_reset(SPI2);
-
-  //SPI2_I2SCFGR = 0;
-  /* Set up SPI in Master mode with:
-   * Clock baud rate: 1/64 of peripheral clock frequency
-   * Clock polarity: Idle High
-   * Clock phase: Data valid on 2nd clock pulse
-   * Data frame format: 8-bit
-   * Frame format: MSB First
-   */
-  spi_init_master(SPI2, SPI_CR1_BAUDRATE_FPCLK_DIV_64, SPI_CR1_CPOL_CLK_TO_1_WHEN_IDLE,
-                  SPI_CR1_CPHA_CLK_TRANSITION_2, SPI_CR1_DFF_16BIT, SPI_CR1_MSBFIRST);
-
-  /*
-   * Set NSS management to software.
-   *
-   * Note:
-   * Setting nss high is very important, even if we are controlling the GPIO
-   * ourselves this bit needs to be at least set to 1, otherwise the spi
-   * peripheral will not send any data out.
-   */
-  spi_enable_software_slave_management(SPI2);
-  spi_set_nss_high(SPI2);
-
-  /* Enable SPI1 periph. */
-  spi_enable(SPI2);
-}
-
+// Output buffer (must match HID report descriptor)
+int8_t outbuf[ 4 ];
 
 int main(void)
 {
-    runMode = STANDBY;
+	// Initialized explicitly for clarity and debugging
+	outbuf[0] = 0; // slider - thrust
+	outbuf[1] = 0; // wheel
+	outbuf[2] = 0; // switch bank 1
+	outbuf[3] = 0; // switch bank 2
 
-	edtc_report.slider = 0;
-	edtc_report.thumb_x = 0;
-	edtc_report.thumb_y = 0;
-	edtc_report.buttons = 0;
+	edtc_report.slider1 = 0;
+	edtc_report.slider2 = 0;
+	edtc_report.buttons1 = 4;
+	edtc_report.buttons2 = 3;
 
-    // Enable required clocks
-    //rcc_clock_setup_in_hsi_out_48mhz();
-    csd_clock_setup();
-    gpio_setup();
-    adc_setup();
-	spi_setup();
+	rcc_clock_setup_in_hse_8mhz_out_72mhz();
+
+	gpio_setup();
+	adc_setup();
+
 
     /* ADC channels for conversion*/
-	uint8_t channel_array[16] = {0};
-	channel_array[0] = 0;
-    channel_array[1] = 1;
-	channel_array[2] = 2;
-	
-	adc_set_regular_sequence(ADC1, 3, channel_array);
-
+	uint8_t channel_array[2] = {0};
 	/*
 	 * This is a somewhat common cheap hack to trigger device re-enumeration
 	 * on startup.  Assuming a fixed external pullup on D+, (For USB-FS)
@@ -368,70 +60,101 @@ int main(void)
 	usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev_descr, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
 	usbd_register_set_config_callback(usbd_dev, hid_set_config);
 
-    uint32_t frame = 0;
-    
-	while (1)
+	while (true)
 	{
-		// Get control data from Arduino over SPI
-		
-
-		if(!(frame % 40))
-		{
-			uint16_t outmsg = 128;
-			spi_send(SPI2, outmsg);
-		}
-
-		//uint32_t inmsg = 0;
-
+		channel_array[0] = 3;
+		adc_set_regular_sequence(ADC1, 1, channel_array);
 		//ADC1
-		adc_start_conversion_regular(ADC1);
+		adc_start_conversion_direct(ADC1);
 		/* Wait for end of conversion. */
-        while (!(adc_eoc(ADC1)))
+		while (!(adc_eoc(ADC1)))
 			continue;
-		uint16_t tk1 = (adc_read_regular(ADC1) / 16) - 128;
-		memcpy(&edtc_report.slider, &tk1, 1);
-
-		//ADC2
-		adc_start_conversion_regular(ADC1);
-        while (!(adc_eoc(ADC1)))
-			continue;
-		tk1 = (adc_read_regular(ADC1) / 16) - 128;
-		memcpy(&edtc_report.thumb_y, &tk1, 1);
-
-		//ADC3
-		adc_start_conversion_regular(ADC1);
-        while (!(adc_eoc(ADC1)))
-			continue;
-		tk1 = (adc_read_regular(ADC1) / 16) - 128;
-		memcpy(&edtc_report.thumb_x, &tk1, 1);
 		
+		int16_t tk1 = adc_read_regular(ADC1);  // range (135 - 3800)
+		csint[0] = tk1;
+		tk1 -= 135;
+		if(tk1 > 3665) tk1 = 3665;
+		if(tk1 < 10)   tk1 = 0;
+		float tf1 = ((float)tk1 / 3665.0 * 255.0) - 127.0;
+		if(tf1 > 127.0) tf1 = 127.0;
+		if(tf1 < -127.0) tf1 = -127.0;
+		tk1 = (int8_t)tf1;
+		edtc_report.slider1 = tk1;
+		
+		//ADC2
+		channel_array[0] = 0;
+		adc_set_regular_sequence(ADC1, 1, channel_array);
+		adc_start_conversion_direct(ADC1);
+		while (!(adc_eoc(ADC1)))
+			continue;
+		int16_t tk2 = adc_read_regular(ADC1);  // range (1400)
+		csint[1] = tk2;
+		if(tk2 > 1400) tk2 = 1400;
+		if(tk2 < 0)    tk2 = 0;
+		float tf2 = ((float)tk2 / 1400.0 * 255.0) - 127.0;
+		if(tf2 > 127.0) tf2 = 127.0;
+		if(tf2 < -127.0) tf2 = -127.0;
+		tk2 = (int8_t)tf2;
+		edtc_report.slider2 = tk2;
 
-		uint8_t tb[5] = {0};
-		/*tb[0] = !gpio_get(GPIOB, GPIO5);
-		tb[1] = !gpio_get(GPIOB, GPIO6);
-		tb[2] = !gpio_get(GPIOB, GPIO7);
-		tb[3] = !gpio_get(GPIOB, GPIO8);
-		tb[4] = !gpio_get(GPIOB, GPIO9);
-		*/
-
-		uint8_t btns = (tb[4] << 4) | (tb[3] << 3) | (tb[2] << 2) | (tb[1] << 1) | (tb[0]);
-		memcpy(&edtc_report.buttons, &btns, 1);
-
-		if(edtc_report.slider > 0)
-			gpio_set(GPIOC, GPIO13);
-		else
-			gpio_clear(GPIOC, GPIO13);
-		usbd_ep_write_packet(usbd_dev, 0x81, &edtc_report, 3);  	
 		usbd_poll(usbd_dev);
-
-		frame++;
-
-		if(frame > 400000000)
-			frame = 0;
 	}
 }
 
 void sys_tick_handler(void)
 {
+
+    int8_t swbnk1[16] = {0};
 	
+	// index directional switch
+	gpio_clear(GPIOB, GPIO14);
+	gpio_set(GPIOB, GPIO12 | GPIO13);
+	swbnk1[0] = !gpio_get(GPIOB, GPIO4); // push
+	swbnk1[1] = !gpio_get(GPIOB, GPIO5); // up 
+	swbnk1[2] = !gpio_get(GPIOB, GPIO6); // left
+	swbnk1[3] = !gpio_get(GPIOB, GPIO7); // down
+	//swbnk1[4] = !gpio_get(GPIOB, GPIO8); 
+	swbnk1[4] = !gpio_get(GPIOB, GPIO9); // right
+
+    // thumb directional switch
+	gpio_clear(GPIOB, GPIO12);
+	gpio_set(GPIOB, GPIO13 | GPIO14);
+	//gpio_set(GPIOB, GPIO14);
+	swbnk1[5] = !gpio_get(GPIOB, GPIO4);  // push
+	swbnk1[6] = !gpio_get(GPIOB, GPIO5);  // left
+	swbnk1[7] = !gpio_get(GPIOB, GPIO6);  // down
+	swbnk1[8] = !gpio_get(GPIOB, GPIO7);  // right
+	swbnk1[9] = !gpio_get(GPIOB, GPIO9); // up (inop)
+	//swbnk1[11] = !gpio_get(GPIOB, GPIO8);
+
+	// chromatic buttons
+	gpio_clear(GPIOB, GPIO13);
+	gpio_set(GPIOB, GPIO12 | GPIO14);
+	swbnk1[10] = !gpio_get(GPIOB, GPIO4); // BLK, right-side
+	swbnk1[11] = !gpio_get(GPIOB, GPIO5); // ORG
+	swbnk1[12] = !gpio_get(GPIOB, GPIO6); // BLK, left-side
+	swbnk1[13] = !gpio_get(GPIOB, GPIO7); // BRN
+	swbnk1[14] = !gpio_get(GPIOB, GPIO8); // YEL
+	swbnk1[15] = !gpio_get(GPIOB, GPIO9); // BLU
+
+	int8_t btns1 = swbnk1[0]; // 0;
+
+	for(int i=1;i<8;i++) {
+		//(swbnk1[5] << 5) | (swbnk1[4] << 4) | (swbnk1[3] << 3) | (swbnk1[2] << 2) | (swbnk1[1] << 1) | (swbnk1[0]);
+		btns1 |= (swbnk1[i] << i);
+	}
+
+
+	int8_t btns2 = swbnk1[8];
+	for(int i=9;i<16;i++) {
+		//(swbnk1[5] << 5) | (swbnk1[4] << 4) | (swbnk1[3] << 3) | (swbnk1[2] << 2) | (swbnk1[1] << 1) | (swbnk1[0]);
+		btns2 |= (swbnk1[i] << (i-8));
+	}
+
+	memcpy(&outbuf[0], &edtc_report.slider1, 1);
+	memcpy(&outbuf[1], &edtc_report.slider2, 1);
+	memcpy(&outbuf[2], &btns1, 1);
+	memcpy(&outbuf[3], &btns2, 1);
+
+	usbd_ep_write_packet(usbd_dev, 0x81, &outbuf, sizeof(outbuf));
 }

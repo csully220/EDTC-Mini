@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "systick.h": "c",
+        "hid.h": "c",
+        "dfu.h": "c"
+    }
+}
