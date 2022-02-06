@@ -8,10 +8,9 @@
 
 
 struct hid_report {
+	int32_t buttons;
 	int8_t slider1;
     int8_t slider2;
-	int8_t buttons1;
-	int8_t buttons2;
 } edtc_report;
 
 
@@ -60,15 +59,16 @@ static const uint8_t hid_report_descriptor[] = {
         0x05, 0x09, 		// USAGE_PAGE (Buttons)
 		0xA1, 0x00, 		// COLLECTION (Physical)
 			0x19, 0x01,  		// USAGE_MINUMUM (Button 1)
-			0x29, 0x09,         // USAGE_MAXIMUM (Button 8)
+			0x29, 0x18,         // USAGE_MAXIMUM (Button 24)
 			0x15, 0x00, 		// LOGICAL_MINIMUM (0)
 			0x25, 0x01, 		// LOGICAL_MAXIMUM (1)
 			0x75, 0x01, 		// REPORT_SIZE (1)
-			0x95, 0x08,     	// REPORT_COUNT(8)
+			0x95, 0x18,     	// REPORT_COUNT(8)
 			0x65, 0x00,         // UNIT (None)
 			0x81, 0x02,			// INPUT (Data,Var,Abs)
 		0xc0,       		// END_COLLECTION
 
+/*
 		0xA1, 0x00, 		// COLLECTION (Physical)
 			0x19, 0x09,  		// USAGE_MINUMUM (Button 1)
 			0x29, 0x10,         // USAGE_MAXIMUM (Button 8)
@@ -79,6 +79,18 @@ static const uint8_t hid_report_descriptor[] = {
 			0x65, 0x00,         // UNIT (None)
 			0x81, 0x02,			// INPUT (Data,Var,Abs)
 		0xc0,       		// END_COLLECTION
+
+		0xA1, 0x00, 		// COLLECTION (Physical)
+			0x19, 0x11,  		// USAGE_MINUMUM (Button 1)
+			0x29, 0x18,         // USAGE_MAXIMUM (Button 8)
+			0x15, 0x00, 		// LOGICAL_MINIMUM (0)
+			0x25, 0x01, 		// LOGICAL_MAXIMUM (1)
+			0x75, 0x01, 		// REPORT_SIZE (1)
+			0x95, 0x08,     	// REPORT_COUNT(8)
+			0x65, 0x00,         // UNIT (None)
+			0x81, 0x02,			// INPUT (Data,Var,Abs)
+		0xc0,       		// END_COLLECTION
+*/
 /*
 		0x05, 0x01, 		// USAGE_PAGE (Generic Desktop)
 		0x09, 0x01, 		// USAGE (Pointer)
@@ -120,7 +132,7 @@ const struct usb_endpoint_descriptor hid_endpoint = {
 	.bDescriptorType = USB_DT_ENDPOINT,
 	.bEndpointAddress = 0x81,
 	.bmAttributes = USB_ENDPOINT_ATTR_INTERRUPT,
-	.wMaxPacketSize = 4,
+	.wMaxPacketSize = 5,
 	.bInterval = 0x20,
 };
 

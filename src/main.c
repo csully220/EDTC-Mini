@@ -11,14 +11,17 @@
 #include "csd_usb.h"
 #include "csd_gpio.h"
 
-//#define BUFSZ 3
 
 bool csdbg[8];
 float csflt[8];
 int csint[8];
 
 // Output buffer (must match HID report descriptor)
-int8_t outbuf[ 4 ];
+int8_t outbuf[5];
+
+int8_t swbnk[24] = {0};
+
+//int32_t btns;
 
 int main(void)
 {
@@ -27,11 +30,11 @@ int main(void)
 	outbuf[1] = 0; // wheel
 	outbuf[2] = 0; // switch bank 1
 	outbuf[3] = 0; // switch bank 2
+	outbuf[4] = 0; // switch bank 2
 
 	edtc_report.slider1 = 0;
 	edtc_report.slider2 = 0;
-	edtc_report.buttons1 = 4;
-	edtc_report.buttons2 = 3;
+	edtc_report.buttons = 0;
 
 	rcc_clock_setup_in_hse_8mhz_out_72mhz();
 
@@ -71,11 +74,12 @@ int main(void)
 			continue;
 		
 		int16_t tk1 = adc_read_regular(ADC1);  // range (135 - 3800)
+
 		csint[0] = tk1;
-		tk1 -= 135;
-		if(tk1 > 3665) tk1 = 3665;
+		tk1 -= 2010;
+		if(tk1 > 1790) tk1 = 1790;
 		if(tk1 < 10)   tk1 = 0;
-		float tf1 = ((float)tk1 / 3665.0 * 255.0) - 127.0;
+		float tf1 = ((float)tk1 / 1790.0 * 255.0) - 127.0;
 		if(tf1 > 127.0) tf1 = 127.0;
 		if(tf1 < -127.0) tf1 = -127.0;
 		tk1 = (int8_t)tf1;
@@ -98,63 +102,63 @@ int main(void)
 		edtc_report.slider2 = tk2;
 
 		usbd_poll(usbd_dev);
+
 	}
 }
 
 void sys_tick_handler(void)
 {
-
-    int8_t swbnk1[16] = {0};
-	
 	// index directional switch
 	gpio_clear(GPIOB, GPIO14);
 	gpio_set(GPIOB, GPIO12 | GPIO13);
-	swbnk1[0] = !gpio_get(GPIOB, GPIO4); // push
-	swbnk1[1] = !gpio_get(GPIOB, GPIO5); // up 
-	swbnk1[2] = !gpio_get(GPIOB, GPIO6); // left
-	swbnk1[3] = !gpio_get(GPIOB, GPIO7); // down
-	//swbnk1[4] = !gpio_get(GPIOB, GPIO8); 
-	swbnk1[4] = !gpio_get(GPIOB, GPIO9); // right
+	swbnk[0] = !gpio_get(GPIOB, GPIO4); // idx push
+	swbnk[1] = !gpio_get(GPIOB, GPIO5); // idx up 
+	swbnk[2] = !gpio_get(GPIOB, GPIO7); // idx down
+	swbnk[3] = !gpio_get(GPIOB, GPIO9); // idx left
+	swbnk[4] = !gpio_get(GPIOB, GPIO6); // idx right
+	//swbk1[4] = !gpio_get(GPIOB, GPIO8); // spare
+	
 
     // thumb directional switch
 	gpio_clear(GPIOB, GPIO12);
 	gpio_set(GPIOB, GPIO13 | GPIO14);
 	//gpio_set(GPIOB, GPIO14);
-	swbnk1[5] = !gpio_get(GPIOB, GPIO4);  // push
-	swbnk1[6] = !gpio_get(GPIOB, GPIO5);  // left
-	swbnk1[7] = !gpio_get(GPIOB, GPIO6);  // down
-	swbnk1[8] = !gpio_get(GPIOB, GPIO7);  // right
-	swbnk1[9] = !gpio_get(GPIOB, GPIO9); // up (inop)
-	//swbnk1[11] = !gpio_get(GPIOB, GPIO8);
-
+	swbnk[5] = !gpio_get(GPIOB, GPIO4);  // thumb push
+	swbnk[6] = !gpio_get(GPIOB, GPIO9); // thumb up
+	swbnk[7] = !gpio_get(GPIOB, GPIO6);  // thumb down
+	swbnk[8] = !gpio_get(GPIOB, GPIO5);  // thumb left
+	swbnk[9] = !gpio_get(GPIOB, GPIO7);  // thumb right
+	//swbnk1[11] = !gpio_get(GPIOB, GPIO8); // spare
+	
 	// chromatic buttons
 	gpio_clear(GPIOB, GPIO13);
 	gpio_set(GPIOB, GPIO12 | GPIO14);
-	swbnk1[10] = !gpio_get(GPIOB, GPIO4); // BLK, right-side
-	swbnk1[11] = !gpio_get(GPIOB, GPIO5); // ORG
-	swbnk1[12] = !gpio_get(GPIOB, GPIO6); // BLK, left-side
-	swbnk1[13] = !gpio_get(GPIOB, GPIO7); // BRN
-	swbnk1[14] = !gpio_get(GPIOB, GPIO8); // YEL
-	swbnk1[15] = !gpio_get(GPIOB, GPIO9); // BLU
+	swbnk[10] = !gpio_get(GPIOB, GPIO9); // BLU
+	swbnk[11] = !gpio_get(GPIOB, GPIO5); // ORG
+	swbnk[12] = !gpio_get(GPIOB, GPIO7); // BRN
+	swbnk[13] = !gpio_get(GPIOB, GPIO8); // YEL
+	swbnk[14] = !gpio_get(GPIOB, GPIO6); // LEFT BLK
+	swbnk[15] = !gpio_get(GPIOB, GPIO4); // RIGHT BLK
 
-	int8_t btns1 = swbnk1[0]; // 0;
+	// misc buttons and switches
+	swbnk[16] = !gpio_get(GPIOB, GPIO15); // Heatsink
+	swbnk[17] = 0;
+	swbnk[18] = 0;
+	swbnk[19] = 0;
+	swbnk[20] = 0;
+	swbnk[21] = 0;
+	swbnk[22] = 0;
+	swbnk[23] = 0;
 
-	for(int i=1;i<8;i++) {
-		//(swbnk1[5] << 5) | (swbnk1[4] << 4) | (swbnk1[3] << 3) | (swbnk1[2] << 2) | (swbnk1[1] << 1) | (swbnk1[0]);
-		btns1 |= (swbnk1[i] << i);
-	}
-
-
-	int8_t btns2 = swbnk1[8];
-	for(int i=9;i<16;i++) {
-		//(swbnk1[5] << 5) | (swbnk1[4] << 4) | (swbnk1[3] << 3) | (swbnk1[2] << 2) | (swbnk1[1] << 1) | (swbnk1[0]);
-		btns2 |= (swbnk1[i] << (i-8));
+	edtc_report.buttons = 0;
+	for(int i=0;i<24;i++) {
+		edtc_report.buttons |= (swbnk[i] << i);
 	}
 
 	memcpy(&outbuf[0], &edtc_report.slider1, 1);
 	memcpy(&outbuf[1], &edtc_report.slider2, 1);
-	memcpy(&outbuf[2], &btns1, 1);
-	memcpy(&outbuf[3], &btns2, 1);
+	memcpy(&outbuf[2], &edtc_report.buttons, 3);
 
-	usbd_ep_write_packet(usbd_dev, 0x81, &outbuf, sizeof(outbuf));
+	usbd_ep_write_packet(usbd_dev, 0x81, &outbuf, 5);
+
 }
