@@ -21,8 +21,6 @@ int8_t outbuf[5];
 
 int8_t swbnk[24] = {0};
 
-//int32_t btns;
-
 int main(void)
 {
 	// Initialized explicitly for clarity and debugging
@@ -91,11 +89,11 @@ int main(void)
 		adc_start_conversion_direct(ADC1);
 		while (!(adc_eoc(ADC1)))
 			continue;
-		int16_t tk2 = adc_read_regular(ADC1);  // range (1400)
+		int16_t tk2 = adc_read_regular(ADC1);  // range (0-4089)
 		csint[1] = tk2;
-		if(tk2 > 1400) tk2 = 1400;
+		if(tk2 > 4080) tk2 = 4080;
 		if(tk2 < 0)    tk2 = 0;
-		float tf2 = ((float)tk2 / 1400.0 * 255.0) - 127.0;
+		float tf2 = ((float)tk2 / 4080.0 * 255.0) - 127.0;
 		if(tf2 > 127.0) tf2 = 127.0;
 		if(tf2 < -127.0) tf2 = -127.0;
 		tk2 = (int8_t)tf2;
@@ -142,13 +140,19 @@ void sys_tick_handler(void)
 
 	// misc buttons and switches
 	swbnk[16] = !gpio_get(GPIOB, GPIO15); // Heatsink
-	swbnk[17] = 0;
-	swbnk[18] = 0;
-	swbnk[19] = 0;
-	swbnk[20] = 0;
-	swbnk[21] = 0;
-	swbnk[22] = 0;
-	swbnk[23] = 0;
+	swbnk[17] = !gpio_get(GPIOA, GPIO10); // Reset pips
+
+	// pip increment & fill
+	gpio_clear(GPIOA, GPIO8);
+	gpio_set(GPIOA, GPIO9);
+	swbnk[18] = !gpio_get(GPIOA, GPIO5);
+	swbnk[19] = !gpio_get(GPIOA, GPIO6);
+	swbnk[20] = !gpio_get(GPIOA, GPIO7);
+	gpio_clear(GPIOA, GPIO9);
+	gpio_set(GPIOA, GPIO8);
+	swbnk[21] = !gpio_get(GPIOA, GPIO5);
+	swbnk[22] = !gpio_get(GPIOA, GPIO6);
+	swbnk[23] = !gpio_get(GPIOA, GPIO7);
 
 	edtc_report.buttons = 0;
 	for(int i=0;i<24;i++) {
